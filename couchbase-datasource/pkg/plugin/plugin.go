@@ -264,18 +264,29 @@ func (d *CouchbaseDatasource) query(channel *string, query_data *QueryRequest) b
 }
 
 func normalizeFieldData(name string, values []interface{}) (string, []interface{}) {
-	result := make([]interface{}, len(values))
-	if strings.EqualFold(name, "time") {
-		for i, v := range values {
-			if time, err := time.Parse(time.RFC3339, v.(string)); err == nil {
-				result[i] = time
-			} else {
-				panic(err)
-			}
+	result := make([]interface{}, 0, len(values))
+	isTime := strings.EqualFold(name, "time")
+	for _, v := range values {
+		if v == nil {
+			continue // skip nils
 		}
+		if isTime {
+			if timeStr, ok := v.(string); ok {
+				if timeVal, err := time.Parse(time.RFC3339, timeStr); err == nil {
+					result = append(result, timeVal)
+				} else {
+					panic(err)
+				}
+			}
+			// If not a string, skip (or handle as needed)
+		} else {
+			result = append(result, v)
+		}
+	}
+	if isTime {
 		return "Time", result
 	}
-	return name, values
+	return name, result
 }
 
 func createField(name string, values []interface{}) *data.Field {
