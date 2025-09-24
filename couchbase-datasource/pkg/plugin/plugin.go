@@ -290,13 +290,13 @@ func normalizeFieldData(name string, values []interface{}) (string, []interface{
 }
 
 func createField(name string, values []interface{}) *data.Field {
+	name, values = normalizeFieldData(name, values)
+
 	vlen := len(values)
 	if vlen == 0 {
 		return data.NewField(name, nil, []bool{})
 	}
-
-	name, values = normalizeFieldData(name, values)
-
+	
 	log.DefaultLogger.Debug(fmt.Sprintf("field %s: %d values", name, vlen))
 	switch v := values[0].(type) {
 	case int8:
