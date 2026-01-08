@@ -175,8 +175,8 @@ func (d *CouchbaseDatasource) query(channel *string, query_data *QueryRequest) b
 			query_string = strTimeRg.ReplaceAllString(query_string, fmt.Sprintf("STR_TO_MILLIS($1) > STR_TO_MILLIS('%s') AND STR_TO_MILLIS($1) <= STR_TO_MILLIS('%s')", tr.From.Format(time.RFC3339), tr.To.Format(time.RFC3339)))
 			query_string = "SELECT * FROM (" + query_string + ") AS data ORDER by str_to_millis(data." + *timeField + ") ASC"
 		}
-	}
-	// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+	} 
+
 	if timeRg, e := regexp.Compile("(?i)time_range\\s*\\((?P<field>[^\\)]+)\\)"); e != nil {
 		panic(e)
 	} else {
@@ -195,7 +195,7 @@ func (d *CouchbaseDatasource) query(channel *string, query_data *QueryRequest) b
 		response.Error = errors.New("Failed to detect time field. Please use time_range(fieldName) or str_time_range(fieldName) functions in WHERE clause of your query.")
 		return response
 	}
-	// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+	
 	log.DefaultLogger.Info("Unmarshalled json", "query_string", query_string)
 
 	log.DefaultLogger.Info("Querying couchbase", "query_string", query_string)
