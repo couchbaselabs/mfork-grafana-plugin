@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 
@@ -174,7 +175,7 @@ func (d *CouchbaseDatasource) query(channel *string, query_data *QueryRequest) b
 			query_string = strTimeRg.ReplaceAllString(query_string, fmt.Sprintf("STR_TO_MILLIS($1) > STR_TO_MILLIS('%s') AND STR_TO_MILLIS($1) <= STR_TO_MILLIS('%s')", tr.From.Format(time.RFC3339), tr.To.Format(time.RFC3339)))
 			query_string = "SELECT * FROM (" + query_string + ") AS data ORDER by str_to_millis(data." + *timeField + ") ASC"
 		}
-	}
+	} 
 
 	if timeRg, e := regexp.Compile("(?i)time_range\\s*\\((?P<field>[^\\)]+)\\)"); e != nil {
 		panic(e)
@@ -194,7 +195,7 @@ func (d *CouchbaseDatasource) query(channel *string, query_data *QueryRequest) b
 		response.Error = errors.New("Failed to detect time field. Please use time_range(fieldName) or str_time_range(fieldName) functions in WHERE clause of your query.")
 		return response
 	}
-
+	
 	log.DefaultLogger.Info("Unmarshalled json", "query_string", query_string)
 
 	log.DefaultLogger.Info("Querying couchbase", "query_string", query_string)
@@ -248,9 +249,21 @@ func (d *CouchbaseDatasource) query(channel *string, query_data *QueryRequest) b
 
 		}
 
-		frame.Fields = make(data.Fields, len(keys))
+		// Drop any fields with zero values to avoid mismatched frame lengths
+		cleanedKeys := make([]string, 0, len(keys))
+		cleanedVals := make([][]interface{}, 0, len(vals))
 		for i, key := range keys {
-			frame.Fields[i] = createField(key, vals[i])
+			if len(vals[i]) > 0 {
+				cleanedKeys = append(cleanedKeys, key)
+				cleanedVals = append(cleanedVals, vals[i])
+			} else {
+				log.DefaultLogger.Warn("Dropping empty field", "field", key)
+			}
+		}
+
+		frame.Fields = make(data.Fields, len(cleanedKeys))
+		for i, key := range cleanedKeys {
+			frame.Fields[i] = createField(key, cleanedVals[i])
 		}
 
 		if channel != nil {
@@ -267,18 +280,31 @@ func normalizeFieldData(name string, values []interface{}) (string, []interface{
 	result := make([]interface{}, 0, len(values))
 	isTime := strings.EqualFold(name, "time")
 	for _, v := range values {
-		if v == nil {
-			continue // skip nils
-		}
 		if isTime {
-			if timeStr, ok := v.(string); ok {
+			if v == nil {
+				result = append(result, nil)
+			} else if timeStr, ok := v.(string); ok {
 				if timeVal, err := time.Parse(time.RFC3339, timeStr); err == nil {
 					result = append(result, timeVal)
 				} else {
-					panic(err)
+					// attempt epoch millis from string
+					if ms, err2 := strconv.ParseInt(timeStr, 10, 64); err2 == nil {
+						result = append(result, time.UnixMilli(ms))
+					} else {
+						// preserve original value if parsing fails
+						result = append(result, v)
+					}
 				}
+			} else if f64, ok := v.(float64); ok {
+				// epoch millis as float64
+				result = append(result, time.UnixMilli(int64(f64)))
+			} else if i64, ok := v.(int64); ok {
+				// epoch millis as int64
+				result = append(result, time.UnixMilli(i64))
+			} else {
+				// If not a string and not nil, try to preserve it
+				result = append(result, v)
 			}
-			// If not a string, skip (or handle as needed)
 		} else {
 			result = append(result, v)
 		}
@@ -296,7 +322,7 @@ func createField(name string, values []interface{}) *data.Field {
 	if vlen == 0 {
 		return data.NewField(name, nil, []bool{})
 	}
-	
+
 	log.DefaultLogger.Debug(fmt.Sprintf("field %s: %d values", name, vlen))
 	switch v := values[0].(type) {
 	case int8:
