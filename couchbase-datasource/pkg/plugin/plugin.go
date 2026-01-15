@@ -175,7 +175,7 @@ func (d *CouchbaseDatasource) query(channel *string, query_data *QueryRequest) b
 			query_string = strTimeRg.ReplaceAllString(query_string, fmt.Sprintf("STR_TO_MILLIS($1) > STR_TO_MILLIS('%s') AND STR_TO_MILLIS($1) <= STR_TO_MILLIS('%s')", tr.From.Format(time.RFC3339), tr.To.Format(time.RFC3339)))
 			query_string = "SELECT * FROM (" + query_string + ") AS data ORDER by str_to_millis(data." + *timeField + ") ASC"
 		}
-	} 
+	}
 
 	if timeRg, e := regexp.Compile("(?i)time_range\\s*\\((?P<field>[^\\)]+)\\)"); e != nil {
 		panic(e)
@@ -195,7 +195,7 @@ func (d *CouchbaseDatasource) query(channel *string, query_data *QueryRequest) b
 		response.Error = errors.New("Failed to detect time field. Please use time_range(fieldName) or str_time_range(fieldName) functions in WHERE clause of your query.")
 		return response
 	}
-	
+
 	log.DefaultLogger.Info("Unmarshalled json", "query_string", query_string)
 
 	log.DefaultLogger.Info("Querying couchbase", "query_string", query_string)
@@ -241,8 +241,12 @@ func (d *CouchbaseDatasource) query(channel *string, query_data *QueryRequest) b
 				val := d[key]
 				vals[i] = append(vals[i], val)
 				if key == *timeField {
-					if to, e := time.Parse(time.RFC3339, val.(string)); e == nil {
-						query_data.Range.To = to
+					if val != nil {
+						if ts, ok := val.(string); ok {
+							if to, e := time.Parse(time.RFC3339, ts); e == nil {
+								query_data.Range.To = to
+							}
+						}
 					}
 				}
 			}
@@ -446,9 +450,34 @@ func createField(name string, values []interface{}) *data.Field {
 		}
 		return data.NewField(name, nil, r)
 	case string:
+		// If any value is nil or non-string, fall back to []*string to preserve nulls
+		needsPtr := false
+		for _, vv := range values {
+			if vv == nil {
+				needsPtr = true
+				break
+			}
+			if _, ok := vv.(string); !ok {
+				needsPtr = true
+				break
+			}
+		}
+		if needsPtr {
+			r := make([]*string, vlen)
+			for i, vv := range values {
+				if vv == nil {
+					r[i] = nil
+				} else {
+					s := vv.(string)
+					sCopy := s
+					r[i] = &sCopy
+				}
+			}
+			return data.NewField(name, nil, r)
+		}
 		r := make([]string, vlen)
-		for i, v := range values {
-			r[i] = v.(string)
+		for i, vv := range values {
+			r[i] = vv.(string)
 		}
 		return data.NewField(name, nil, r)
 	case *string:
